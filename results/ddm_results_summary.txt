@@ -1,0 +1,11 @@
+DDM Analysis Summary
+==================================================
+
+Diffusion Coefficient: D = 0.0013 ± 0.0003 μm²/s
+Hydrodynamic Radius: R_h = 170593.95 nm
+
+Experimental Parameters:
+  Frames: 100
+  Frame rate: 4.0 fps
+  Pixel size: 6.5 μm
+  Magnification: 50.0×

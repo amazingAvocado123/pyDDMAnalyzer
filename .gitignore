@@ -1,0 +1,8 @@
+pyDDMAnalyzer/
+__pycache__/
+*.py[cod]
+*.swp
+.env
+.env.*
+.vscode/
+.idea/
