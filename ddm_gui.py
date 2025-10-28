@@ -4,17 +4,34 @@ Easy-to-use interface for Differential Dynamic Microscopy analysis
 Supports video files AND sequential TIF directories
 """
 
+import sys
+import io
+
+# Force UTF-8 encoding for console output (Windows compatibility)
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import threading
 from pathlib import Path
-import sys
 
 # Import the DDM analyzer
 from ddm_analyzer import run_ddm_analysis
 
 
 class DDMGUI:
+    @staticmethod
+    def sanitize_text(text):
+        """Remove any non-ASCII characters that might cause encoding issues"""
+        try:
+            # Try to encode as ASCII, replacing bad characters
+            return str(text).encode('ascii', errors='replace').decode('ascii')
+        except:
+            return "Error message contains special characters"
+    
     def __init__(self, root):
         self.root = root
         self.root.title("DDM Analyzer - Differential Dynamic Microscopy")
@@ -125,11 +142,11 @@ class DDMGUI:
         row += 1
         
         # Pixel size
-        ttk.Label(main_frame, text="Camera Pixel Size (μm):").grid(
+        ttk.Label(main_frame, text="Camera Pixel Size (um):").grid(
             row=row, column=0, sticky=tk.W, pady=5)
         pixel_entry = ttk.Entry(main_frame, textvariable=self.pixel_size, width=15)
         pixel_entry.grid(row=row, column=1, sticky=tk.W, pady=5)
-        ttk.Label(main_frame, text="(typically 3-7 μm)", 
+        ttk.Label(main_frame, text="(typically 3-7 um)", 
                  font=('Arial', 8, 'italic'), foreground='gray').grid(
             row=row, column=2, sticky=tk.W, pady=5)
         row += 1
@@ -225,12 +242,12 @@ class DDMGUI:
         button_frame.grid(row=row, column=0, columnspan=3, pady=10)
         row += 1
         
-        self.run_button = ttk.Button(button_frame, text="▶ Run Analysis", 
+        self.run_button = ttk.Button(button_frame, text="> Run Analysis", 
                                      command=self.run_analysis,
                                      style='Accent.TButton')
         self.run_button.pack(side=tk.LEFT, padx=5)
         
-        self.stop_button = ttk.Button(button_frame, text="■ Stop", 
+        self.stop_button = ttk.Button(button_frame, text="[Stop] Stop", 
                                       command=self.stop_analysis,
                                       state='disabled')
         self.stop_button.pack(side=tk.LEFT, padx=5)
@@ -306,7 +323,7 @@ class DDMGUI:
             mag = self.magnification.get()
             effective = pixel / mag
             self.effective_pixel_label.config(
-                text=f"→ Effective pixel size in sample: {effective:.3f} μm/pixel")
+                text=f"=> Effective pixel size in sample: {effective:.3f} um/pixel")
         except:
             self.effective_pixel_label.config(text="")
     
@@ -352,8 +369,13 @@ class DDMGUI:
             self.log(f"Output directory: {directory}")
     
     def log(self, message):
-        """Add message to log display"""
-        self.log_text.insert(tk.END, message + "\n")
+        """Add message to log display with UTF-8 error handling"""
+        try:
+            self.log_text.insert(tk.END, message + "\n")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            # Fallback: replace problematic characters
+            safe_message = message.encode('ascii', errors='replace').decode('ascii')
+            self.log_text.insert(tk.END, safe_message + "\n")
         self.log_text.see(tk.END)
         self.log_text.update()
     
@@ -484,22 +506,22 @@ class DDMGUI:
                 
                 results_text = f"""
 Diffusion Coefficient:
-  D = {D:.4f} ± {D_std:.4f} μm²/s
+  D = {D:.4f} +/- {D_std:.4f} um^2/s
 
 Hydrodynamic Radius:
   R_h = {R_h:.2f} nm
 
 Files saved to: {output_dir}
-  • ddm_analysis.png
-  • ddm_results.csv
-  • ddm_results_summary.txt
+  - ddm_analysis.png
+  - ddm_results.csv
+  - ddm_results_summary.txt
                 """
                 
                 # Update results display on main thread
                 self.root.after(0, lambda: self.results_label.config(
                     text=results_text, font=('Courier', 9), foreground='green'))
                 
-                self.log("\n✓ Success! Check the output directory for detailed results.")
+                self.log("\n[OK] Success! Check the output directory for detailed results.")
                 
                 # Ask if user wants to open results folder
                 self.root.after(0, lambda: self._ask_open_folder(output_dir))
@@ -508,11 +530,12 @@ Files saved to: {output_dir}
                 sys.stdout = old_stdout
             
         except Exception as e:
-            self.log(f"\n✗ ERROR: {str(e)}")
+            error_msg = self.sanitize_text(str(e))
+            self.log(f"\n[ERROR] {error_msg}")
             import traceback
             self.log(traceback.format_exc())
             self.root.after(0, lambda: messagebox.showerror("Analysis Error", 
-                                                            f"An error occurred:\n{str(e)}"))
+                                                            f"An error occurred:\n{error_msg}"))
             self.root.after(0, lambda: self.results_label.config(
                 text="Analysis failed. See log for details.", foreground='red'))
         
@@ -557,7 +580,12 @@ class LogRedirector:
     
     def write(self, message):
         if message.strip():
-            self.log_func(message.rstrip())
+            # Ensure proper encoding handling
+            try:
+                self.log_func(message.rstrip())
+            except UnicodeEncodeError:
+                # Fallback: replace problematic characters
+                self.log_func(message.rstrip().encode('utf-8', errors='replace').decode('utf-8'))
     
     def flush(self):
         pass

@@ -4,8 +4,22 @@ Differential Dynamic Microscopy for measuring particle diffusion
 Supports video files AND sequential TIF image directories
 """
 
+import sys
+import io
+
+# Force UTF-8 encoding for console output (Windows compatibility)
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
+# Configure matplotlib for UTF-8
+matplotlib.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial', 'sans-serif']
+matplotlib.rcParams['axes.unicode_minus'] = False
 from scipy.optimize import curve_fit
 from scipy.ndimage import zoom
 import cv2
@@ -27,12 +41,12 @@ class DDMParameters:
     
     @property
     def q_min(self):
-        """Minimum wave vector (μm⁻¹)"""
+        """Minimum wave vector (um^-1)"""
         return 2 * np.pi / (self.roi_size * self.pixel_size_um / self.magnification)
     
     @property
     def q_max(self):
-        """Maximum wave vector (μm⁻¹)"""
+        """Maximum wave vector (um^-1)"""
         return np.pi * self.magnification / self.pixel_size_um
 
 
@@ -118,7 +132,7 @@ class DDMAnalyzer:
         
         self.images = np.array(frames)
         self.params.n_frames = len(frames)
-        print(f"✓ Loaded {self.params.n_frames} frames of size {self.images.shape[1:]}")
+        print(f"[OK] Loaded {self.params.n_frames} frames of size {self.images.shape[1:]}")
         
     def load_video(self, video_path: str, roi=None):
         """
@@ -207,11 +221,11 @@ class DDMAnalyzer:
                 diffs.append(diff)
             self.diff_images[lag] = np.array(diffs)
             
-        print(f"✓ Computed difference images for {len(lag_times)} lag times")
+        print(f"[OK] Computed difference images for {len(lag_times)} lag times")
         
     def compute_structure_function(self):
         """
-        Compute the image structure function |F(q,t)|² = |𝒟(q,t)|²
+        Compute the image structure function |F(q,t)|^2 = |D(q,t)|^2
         
         This is the core DDM calculation
         """
@@ -234,7 +248,7 @@ class DDMAnalyzer:
             # Compute 2D FFT of each difference image
             fft_stack = np.fft.fft2(self.diff_images[lag])
             
-            # Compute |F(q,t)|² and average over all pairs
+            # Compute |F(q,t)|^2 and average over all pairs
             power_spectrum = np.abs(fft_stack)**2
             avg_power = np.mean(power_spectrum, axis=0)
             
@@ -252,12 +266,12 @@ class DDMAnalyzer:
             self.structure_function[lag] = structure_func
         
         self.q_values = q_centers
-        print(f"✓ Computed structure function for q range: {q_centers[0]:.3f} to {q_centers[-1]:.3f} μm⁻¹")
+        print(f"[OK] Computed structure function for q range: {q_centers[0]:.3f} to {q_centers[-1]:.3f} um^-1")
         
     def fit_exponential_growth(self, q_range=None):
         """
         Fit structure function to exponential growth model:
-        𝒟(q,t) = A(q)[1 - exp(-Γ(q)t)] + B(q)
+        D(q,t) = A(q)[1 - exp(-Gamma(q)t)] + B(q)
         
         Parameters:
         -----------
@@ -265,7 +279,7 @@ class DDMAnalyzer:
             Range of q values to analyze
         """
         def structure_model(t, A, Gamma, B):
-            """Model: A(1 - exp(-Γt)) + B"""
+            """Model: A(1 - exp(-Gammat)) + B"""
             return A * (1 - np.exp(-Gamma * t)) + B
         
         # Select q range
@@ -312,16 +326,16 @@ class DDMAnalyzer:
                 self.decay_rates[i] = np.nan
         
         self.q_fit = q_selected
-        print(f"✓ Fitted {np.sum(~np.isnan(self.decay_rates))} q values successfully")
+        print(f"[OK] Fitted {np.sum(~np.isnan(self.decay_rates))} q values successfully")
         
     def compute_diffusion_coefficient(self):
         """
-        Compute diffusion coefficient from D = Γ(q) / q²
+        Compute diffusion coefficient from D = Gamma(q) / q^2
         
         Returns:
         --------
         D : float
-            Diffusion coefficient in μm²/s
+            Diffusion coefficient in um^2/s
         D_std : float
             Standard deviation of D measurements
         """
@@ -333,7 +347,7 @@ class DDMAnalyzer:
         # Compute D for each q
         D_values = gamma_valid / (q_valid**2)
         
-        # Fit Γ vs q² to get D from slope
+        # Fit Gamma vs q^2 to get D from slope
         # This is more robust than averaging D values
         popt, pcov = np.polyfit(q_valid**2, gamma_valid, 1, cov=True)
         D = popt[0]
@@ -342,7 +356,7 @@ class DDMAnalyzer:
         self.diffusion_coeff = D
         self.diffusion_std = D_std
         
-        print(f"\n✓ Diffusion Coefficient: D = {D:.3f} ± {D_std:.3f} μm²/s")
+        print(f"\n[OK] Diffusion Coefficient: D = {D:.3f} +/- {D_std:.3f} um^2/s")
         
         return D, D_std
     
@@ -353,9 +367,9 @@ class DDMAnalyzer:
         Parameters:
         -----------
         temperature : float
-            Temperature in Kelvin (default 298 K = 25°C)
+            Temperature in Kelvin (default 298 K = 25 degC)
         viscosity : float
-            Solvent viscosity in Pa·s (default 0.001 = water at 25°C)
+            Solvent viscosity in Pa*s (default 0.001 = water at 25 degC)
         
         Returns:
         --------
@@ -364,16 +378,16 @@ class DDMAnalyzer:
         """
         k_B = 1.38064852e-23  # Boltzmann constant (J/K)
         
-        # Convert D from μm²/s to m²/s
+        # Convert D from um^2/s to m^2/s
         D_SI = self.diffusion_coeff * 1e-12
         
-        # Stokes-Einstein: R_h = k_B*T / (6*π*η*D)
+        # Stokes-Einstein: R_h = k_B*T / (6*pi*eta*D)
         R_h = k_B * temperature / (6 * np.pi * viscosity * D_SI)
         
         # Convert to nm
         R_h_nm = R_h * 1e9
         
-        print(f"✓ Hydrodynamic Radius: R_h = {R_h_nm:.1f} nm")
+        print(f"[OK] Hydrodynamic Radius: R_h = {R_h_nm:.1f} nm")
         
         return R_h_nm
     
@@ -393,7 +407,7 @@ class DDMAnalyzer:
         ax2 = plt.subplot(3, 3, 2)
         lag_mid = self.lag_times[len(self.lag_times)//2]
         ax2.imshow(self.diff_images[lag_mid][0], cmap='RdBu')
-        ax2.set_title(f'Difference Image (Δt = {lag_mid} frames)')
+        ax2.set_title(f'Difference Image (Deltat = {lag_mid} frames)')
         ax2.axis('off')
         
         # 3. 2D FFT of difference image
@@ -414,10 +428,10 @@ class DDMAnalyzer:
                 # Find corresponding index in q_values
                 q_idx = np.argmin(np.abs(self.q_values - q_val))
                 y_data = [self.structure_function[lag][q_idx] for lag in self.lag_times]
-                ax4.plot(lag_times_sec, y_data, 'o-', label=f'q = {q_val:.2f} μm⁻¹')
+                ax4.plot(lag_times_sec, y_data, 'o-', label=f'q = {q_val:.2f} um^-1')
         
         ax4.set_xlabel('Lag time (s)')
-        ax4.set_ylabel('|𝒟(q,t)|²')
+        ax4.set_ylabel('|D(q,t)|^2')
         ax4.set_xscale('log')
         ax4.legend()
         ax4.set_title('Structure Function Growth')
@@ -432,8 +446,8 @@ class DDMAnalyzer:
             ax5.plot(self.q_values, self.structure_function[lag], 
                     label=f't = {lag/self.params.frame_rate:.3f} s')
         
-        ax5.set_xlabel('q (μm⁻¹)')
-        ax5.set_ylabel('|𝒟(q,t)|²')
+        ax5.set_xlabel('q (um^-1)')
+        ax5.set_ylabel('|D(q,t)|^2')
         ax5.legend()
         ax5.set_title('Structure Function vs q')
         ax5.grid(True, alpha=0.3)
@@ -443,18 +457,18 @@ class DDMAnalyzer:
         valid = ~np.isnan(self.decay_rates)
         ax6.loglog(self.q_fit[valid], self.decay_rates[valid], 'o', label='Data')
         
-        # Plot theoretical q² dependence
+        # Plot theoretical q^2 dependence
         q_theory = np.linspace(self.q_fit[valid].min(), self.q_fit[valid].max(), 100)
         gamma_theory = self.diffusion_coeff * q_theory**2
-        ax6.loglog(q_theory, gamma_theory, 'r--', label=f'D = {self.diffusion_coeff:.2f} μm²/s')
+        ax6.loglog(q_theory, gamma_theory, 'r--', label=f'D = {self.diffusion_coeff:.2f} um^2/s')
         
-        ax6.set_xlabel('q (μm⁻¹)')
-        ax6.set_ylabel('Γ (Hz)')
+        ax6.set_xlabel('q (um^-1)')
+        ax6.set_ylabel('Gamma (Hz)')
         ax6.legend()
         ax6.set_title('Decay Rate vs q')
         ax6.grid(True, alpha=0.3)
         
-        # 7. Γ vs q² (linearized)
+        # 7. Gamma vs q^2 (linearized)
         ax7 = plt.subplot(3, 3, 7)
         q_squared = self.q_fit[valid]**2
         ax7.plot(q_squared, self.decay_rates[valid], 'o', label='Data')
@@ -462,23 +476,23 @@ class DDMAnalyzer:
         # Linear fit
         slope, intercept = np.polyfit(q_squared, self.decay_rates[valid], 1)
         ax7.plot(q_squared, slope*q_squared + intercept, 'r--', 
-                label=f'Fit: Γ = {slope:.3f}q² + {intercept:.3f}')
+                label=f'Fit: Gamma = {slope:.3f}q^2 + {intercept:.3f}')
         
-        ax7.set_xlabel('q² (μm⁻²)')
-        ax7.set_ylabel('Γ (Hz)')
+        ax7.set_xlabel('q^2 (um^-2)')
+        ax7.set_ylabel('Gamma (Hz)')
         ax7.legend()
-        ax7.set_title('Linearized: Γ vs q²')
+        ax7.set_title('Linearized: Gamma vs q^2')
         ax7.grid(True, alpha=0.3)
         
-        # 8. Apparent D vs q² (should be flat for Brownian motion)
+        # 8. Apparent D vs q^2 (should be flat for Brownian motion)
         ax8 = plt.subplot(3, 3, 8)
         D_app = self.decay_rates[valid] / (self.q_fit[valid]**2)
         ax8.plot(q_squared, D_app, 'o')
         ax8.axhline(y=self.diffusion_coeff, color='r', linestyle='--', 
-                   label=f'D = {self.diffusion_coeff:.3f} μm²/s')
+                   label=f'D = {self.diffusion_coeff:.3f} um^2/s')
         
-        ax8.set_xlabel('q² (μm⁻²)')
-        ax8.set_ylabel('D_app (μm²/s)')
+        ax8.set_xlabel('q^2 (um^-2)')
+        ax8.set_ylabel('D_app (um^2/s)')
         ax8.legend()
         ax8.set_title('Apparent Diffusion Coefficient')
         ax8.grid(True, alpha=0.3)
@@ -489,21 +503,21 @@ class DDMAnalyzer:
         
         summary_text = f"""
         DDM Analysis Summary
-        ────────────────────
+        --------------------
         
         Experimental Parameters:
-        • Frames: {self.params.n_frames}
-        • Frame rate: {self.params.frame_rate} fps
-        • Pixel size: {self.params.pixel_size_um} μm
-        • Magnification: {self.params.magnification}×
+        - Frames: {self.params.n_frames}
+        - Frame rate: {self.params.frame_rate} fps
+        - Pixel size: {self.params.pixel_size_um} um
+        - Magnification: {self.params.magnification}x
         
         Results:
-        • D = {self.diffusion_coeff:.3f} ± {self.diffusion_std:.3f} μm²/s
-        • R_h = {self.compute_hydrodynamic_radius():.1f} nm
+        - D = {self.diffusion_coeff:.3f} +/- {self.diffusion_std:.3f} um^2/s
+        - R_h = {self.compute_hydrodynamic_radius():.1f} nm
         
         Q-range analyzed:
-        • q_min = {self.q_fit.min():.3f} μm⁻¹
-        • q_max = {self.q_fit.max():.3f} μm⁻¹
+        - q_min = {self.q_fit.min():.3f} um^-1
+        - q_max = {self.q_fit.max():.3f} um^-1
         """
         
         ax9.text(0.1, 0.5, summary_text, fontsize=10, 
@@ -533,21 +547,21 @@ class DDMAnalyzer:
             'Background': self.backgrounds[valid]
         })
         
-        results_df.to_csv(output_path, index=False)
+        results_df.to_csv(output_path, index=False, encoding='utf-8')
         print(f"Exported results to {output_path}")
         
         # Also save summary
         summary_path = output_path.replace('.csv', '_summary.txt')
-        with open(summary_path, 'w') as f:
+        with open(summary_path, 'w', encoding='utf-8') as f:
             f.write(f"DDM Analysis Summary\n")
             f.write(f"{'='*50}\n\n")
-            f.write(f"Diffusion Coefficient: D = {self.diffusion_coeff:.4f} ± {self.diffusion_std:.4f} μm²/s\n")
+            f.write(f"Diffusion Coefficient: D = {self.diffusion_coeff:.4f} +/- {self.diffusion_std:.4f} um^2/s\n")
             f.write(f"Hydrodynamic Radius: R_h = {self.compute_hydrodynamic_radius():.2f} nm\n")
             f.write(f"\nExperimental Parameters:\n")
             f.write(f"  Frames: {self.params.n_frames}\n")
             f.write(f"  Frame rate: {self.params.frame_rate} fps\n")
-            f.write(f"  Pixel size: {self.params.pixel_size_um} μm\n")
-            f.write(f"  Magnification: {self.params.magnification}×\n")
+            f.write(f"  Pixel size: {self.params.pixel_size_um} um\n")
+            f.write(f"  Magnification: {self.params.magnification}x\n")
         
         print(f"Exported summary to {summary_path}")
 
@@ -625,8 +639,8 @@ def run_ddm_analysis(image_path, pixel_size_um, magnification, frame_rate,
         print("ANALYSIS COMPLETE!")
         print("="*60)
         print(f"\nResults saved to: {output_dir}")
-        print(f"  • ddm_analysis.png")
-        print(f"  • ddm_results.csv")
-        print(f"  • ddm_results_summary.txt")
+        print(f"  - ddm_analysis.png")
+        print(f"  - ddm_results.csv")
+        print(f"  - ddm_results_summary.txt")
     
     return analyzer
